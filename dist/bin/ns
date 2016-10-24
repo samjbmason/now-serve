@@ -1,0 +1,141 @@
+#!/usr/bin/env node
+'use strict';
+
+var _path = require('path');
+
+var _path2 = _interopRequireDefault(_path);
+
+var _fsExtra = require('fs-extra');
+
+var _fsExtra2 = _interopRequireDefault(_fsExtra);
+
+var _tmp = require('tmp');
+
+var _tmp2 = _interopRequireDefault(_tmp);
+
+var _args = require('args');
+
+var _args2 = _interopRequireDefault(_args);
+
+var _hasbin = require('hasbin');
+
+var _hasbin2 = _interopRequireDefault(_hasbin);
+
+var _chalk = require('chalk');
+
+var _chalk2 = _interopRequireDefault(_chalk);
+
+var _md = require('md5');
+
+var _md2 = _interopRequireDefault(_md);
+
+var _utils = require('../lib/utils');
+
+function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { default: obj }; }
+
+// Native
+_args2.default.option('cmd', 'The command to run when starting').option('packages', 'Custom packages to add to dependencies (comma-separated)').option('name', 'Custom name for deployment').option('arguments', 'Flags that you want to pass to now').option('single', 'Serve single page apps with just one index.html').option('cache', 'How long static files should be cached in the browser');
+
+// Ours
+
+
+// Packages
+
+
+const flags = _args2.default.parse(process.argv);
+
+if (!_hasbin2.default.sync('now')) {
+  console.error(_chalk2.default.red('Please install now (zeit.co/now) before continuing!'));
+  console.log(_chalk2.default.grey('▲ npm install -g now'));
+
+  process.exit(1);
+}
+
+if (flags.cmd && flags.single) {
+  console.log(_chalk2.default.red('The "single" flag only works if you\'re not using a custom command'));
+}
+
+const file = _args2.default.sub[0];
+let current = process.cwd();
+
+if (file) {
+  current = _path2.default.resolve(process.cwd(), file);
+}
+
+if (!_fsExtra2.default.existsSync(current)) {
+  console.error(_chalk2.default.red('Specified path doesn\'t exist!'));
+  process.exit(1);
+}
+
+const uniqueIdentifier = (0, _md2.default)(current);
+let listCommand = 'list ./content';
+
+if (flags.single) {
+  listCommand += ' -s';
+}
+
+if (flags.cache) {
+  listCommand += ' -c ' + flags.cache;
+}
+
+const pkgDefaults = {
+  name: 'ns',
+  version: '1.0.0',
+  scripts: {
+    start: flags.cmd || listCommand
+  },
+  dependencies: {
+    list: 'latest'
+  }
+};
+
+if (flags.packages) {
+  const list = flags.packages.split(',');
+
+  for (const item of list) {
+    pkgDefaults.dependencies[item] = 'latest';
+  }
+
+  if (flags.cmd) {
+    delete pkgDefaults.dependencies.list;
+  }
+}
+
+if (flags.name) {
+  pkgDefaults.name = flags.name;
+}
+
+let tmpDir = false;
+
+try {
+  tmpDir = _tmp2.default.dirSync({
+    // We need to use the hased directory identifier
+    // Because if we don't use the same id every time,
+    // now won't update the existing deployment and create a new one instead
+    name: `now-serve-${ uniqueIdentifier }`,
+
+    // Keep it, because we'll remove it manually later
+    keep: true
+  });
+} catch (err) {
+  throw err;
+}
+
+const details = _fsExtra2.default.lstatSync(current);
+
+if (details.isDirectory()) {
+  (0, _utils.copyContents)(current, tmpDir.name, pkgDefaults, flags.arguments);
+} else if (details.isFile()) {
+  const fileName = _path2.default.parse(current).base;
+  const target = _path2.default.join(tmpDir.name, '/content', fileName);
+
+  _fsExtra2.default.copy(current, target, err => {
+    if (err) {
+      throw err;
+    }
+
+    (0, _utils.injectPackage)(tmpDir.name, pkgDefaults, flags.arguments);
+  });
+} else {
+  console.error(_chalk2.default.red('Path is neither a file nor a directory!'));
+}
